@@ -7,9 +7,10 @@ use finalfusion::metadata::Metadata;
 use finalfusion::norms::NdNorms;
 use finalfusion::prelude::{Embeddings, VocabWrap};
 use finalfusion::storage::NdArray;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut1, Axis};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut1, Axis, stack};
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
+
 use serde::Serialize;
 use toml::Value;
 
@@ -56,18 +57,33 @@ where
     fn from(trainer: T) -> TrainModel<T> {
         let config = *trainer.config();
         let init_bound = 1.0 / config.dims as f32;
-        let distribution = Uniform::new_inclusive(-init_bound, init_bound);
+        //let distribution = Uniform::new_inclusive(-init_bound, init_bound);
 
-        let input = Array2::random(
-            (trainer.input_vocab().n_input_types(), config.dims as usize),
-            distribution,
-        )
-        .into();
-        let output = Array2::random(
-            (trainer.n_output_types(), config.dims as usize),
-            distribution,
-        )
-        .into();
+        let distribution_mu = Uniform::new_inclusive(-init_bound, init_bound);
+        let distribution_sigma = Uniform::new_inclusive(3.0, 5.0);
+
+        let input = stack(Axis(1), &[
+            Array2::random(
+                (trainer.input_vocab().n_input_types(), config.dims as usize / 2),
+                distribution_mu,
+            ).view(),
+            Array2::random(
+                (trainer.input_vocab().n_input_types(), config.dims as usize / 2),
+                distribution_sigma
+            ).view()
+        ]).unwrap().into();
+
+        let output = stack(Axis(1), &[
+            Array2::random(
+                (trainer.n_output_types(), config.dims as usize / 2),
+                distribution_mu,
+            ).view(),
+            Array2::random(
+                (trainer.n_output_types(), config.dims as usize / 2),
+                distribution_sigma
+            ).view()
+        ]).unwrap().into();
+
         TrainModel {
             trainer,
             input,
@@ -135,7 +151,10 @@ impl<T> TrainModel<T> {
             );
         }
 
-        scale(embed.view_mut(), 1.0 / len as f32);
+        let l = embed.len();
+
+        scale(embed.slice_mut(s![0..l]), 1.0 / len as f32);
+        scale(embed.slice_mut(s![l..]), 1.0/ len as f32 / len as f32);
 
         embed
     }

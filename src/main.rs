@@ -1,3 +1,5 @@
+#[macro_use] extern crate ndarray;
+
 use std::io::stdout;
 
 use clap::{App, AppSettings, Arg, Shell, SubCommand};

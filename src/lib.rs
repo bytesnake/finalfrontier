@@ -1,3 +1,5 @@
+#[macro_use] extern crate ndarray;
+
 mod config;
 pub use crate::config::{
     BucketConfig, CommonConfig, DepembedsConfig, LossType, ModelType, NGramConfig,

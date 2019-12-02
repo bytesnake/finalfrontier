@@ -142,6 +142,26 @@ unsafe fn dot_f32x8(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
     _mm_cvtss_f32(sums) + dot_unvectorized(u, v)
 }
 
+/*#[cfg(target_feature = "avx")]
+unsafe fn kld_f32x8(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
+    assert_eq!(u.len(), v.len());
+
+    let mut u = u
+        .as_slice()
+        .expect("Cannot apply SIMD instructions on non-contiguous data.");
+    let mut v = &v
+        .as_slice()
+        .expect("Cannot apply SIMD instructions on non-contiguous data.")[..u.len()];
+
+    let mut sums1 = _mm256_setzero_ps();
+    let mut sums2 = _mm256_setzero_ps();
+    let mut sums3 = _mm256_setzero_ps();
+
+    while u.len() >= 8 {
+        let ux8 = _mm256_loadu_ps(&u[0] as *const f32);
+        let vx8 = _mm256_loadu_ps(&v[0] as *const f32);
+    }*/
+
 pub fn dot_unvectorized(u: &[f32], v: &[f32]) -> f32 {
     assert_eq!(u.len(), v.len());
     u.iter().zip(v).map(|(&a, &b)| a * b).sum()

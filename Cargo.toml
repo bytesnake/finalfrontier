@@ -29,6 +29,7 @@ serde = { version = "1", features = ["derive"] }
 stdinout = "0.4"
 toml = "0.5"
 zipf = "6"
+packed_simd = { git = "https://github.com/rust-lang/packed_simd.git" }
 
 [build-dependencies]
 git2 = "0.10"
