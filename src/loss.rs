@@ -103,29 +103,38 @@ fn logistic_function(a: f32) -> f32 {
 }
 
 pub fn kld_loss(u: ArrayView1<f32>, v: ArrayView1<f32>, label: bool) -> (f32, Array1<f32>, Array1<f32>) {
-    let kld = kld(u,v);
+    let mut kld = kld(u,v);
+
     let l = u.len() / 2;
 
     if kld.is_nan() || !kld.is_finite() {
+        dbg!(&u);
+        dbg!(&v);
         panic!("Nan");
     }
 
+    let elu = |val:f32| -> f32 { if val > 0.0 { val } else { val.exp() + 1e-4 }};
+    let elud = |val: f32| -> f32 { if val > 0.0 { 1.0 } else { val.exp() }};
+
     let delta1_iter = (0..u.len()).map(|i| {
         if i < l {
-            (u[i] - v[i]) / u[i+l]
+            (u[i] - v[i]) / elu(u[i+l])
         } else {
-            (1.0/v[i]-1.0/u[i]-((u[i-l]-v[i-l])/u[i]).powf(2.0)) / 2.0
+            elud(u[i]) * (elu(v[i]).recip() - 
+                          elu(u[i]).recip() - 
+                          ((u[i-l]-v[i-l]) / elu(u[i])).powf(2.0)) / 2.0
         }
     });
 
     let delta2_iter = (0..u.len()).map(|i| {
         if i < l {
-            -(u[i] - v[i]) / u[i+l]
+            (v[i] - u[i]) / elu(u[i+l])
         } else {
-            (-u[i]/(v[i].powf(2.0)) + 1.0/v[i])/2.0
+            elud(v[i]) * (-elu(u[i])/(elu(v[i]).powf(2.0)) + elu(v[i]).recip())/2.0
         }
     });
 
+    dbg!(&kld);
     if label {
         (
             kld.powf(2.0),
@@ -160,6 +169,10 @@ pub fn kld(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
             unsafe { f32x16::new(*b.uget(off),*b.uget(off+1),*b.uget(off+2),*b.uget(off+3),*b.uget(off+4),*b.uget(off+5),*b.uget(off+6),*b.uget(off+7),
                                 *b.uget(off+8),*b.uget(off+9),*b.uget(off+10),*b.uget(off+11),*b.uget(off+12),*b.uget(off+13),*b.uget(off+14),*b.uget(off+15)) }
         };
+
+    if a.len() != 32 || b.len() != 32 {
+        panic!("Only support dimension of 32");
+    }
 
 	let sigma1 = init_vec(a, 16);
 	let mu1 = init_vec(a, 0);

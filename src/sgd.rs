@@ -161,7 +161,7 @@ impl NegativeSamplingSGD {
 
             let mut input_embed = model.input_embedding_mut(idx as usize);
             let l = input_embed.len() / 2;
-            input_embed.slice_mut(s![l..]).mapv_inplace(|x| f32::max(x, 1e-1));
+            input_embed.slice_mut(s![l..]).mapv_inplace(|x| f32::max(x, 1e-2));
         }
 
         loss
@@ -211,29 +211,19 @@ impl NegativeSamplingSGD {
         label: bool,
         lr: f32,
     ) -> f32 {
-        /*let (loss, part_gradient) =
-            log_logistic_loss(input_embed.view(), model.output_embedding(output), label);
-
-        // Update the input weight: u_n += lr * u_n' v_n. We are not updating
-        // the weight immediately, but accumulating the weight updates in
-        // input_delta.
-        scaled_add(
-            input_delta,
-            model.output_embedding(output),
-            lr * part_gradient,
-        );
-
-        // Update the output weight: v_n += lr * v_n' u_n.
-        scaled_add(
-            model.output_embedding_mut(output),
-            input_embed.view(),
-            lr * part_gradient,
-        );*/
         let (loss, mut part_gradient_input, mut part_gradient_output) =
             kld_loss(input_embed.view(), model.output_embedding(output), label);
 
-        //part_gradient_input.mapv_inplace(|x| f32::max(f32::min(x, 1.0), -1.0));
-        //part_gradient_output.mapv_inplace(|x| f32::max(f32::min(x, 1.0), -5.0));
+        if part_gradient_output.iter().any(|x| !x.is_finite() || x.is_nan()) {
+            dbg!(loss);
+            dbg!(&part_gradient_output);
+            dbg!(&model.output_embedding(output));
+
+            panic!("Gradient not finite!");
+        }
+
+        //part_gradient_input.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));
+        //part_gradient_output.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));
 
         scaled_add(
             input_delta,
@@ -248,7 +238,7 @@ impl NegativeSamplingSGD {
         );
 
         let l = part_gradient_input.len() / 2;
-        model.output_embedding_mut(output).slice_mut(s![l..]).mapv_inplace(|x| f32::max(x, 1e-1));
+        model.output_embedding_mut(output).slice_mut(s![l..]).mapv_inplace(|x| f32::max(x, 1e-2));
 
         //dbg!("Output {}", model.output_embedding_mut(output));
 

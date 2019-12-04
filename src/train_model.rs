@@ -57,10 +57,11 @@ where
     fn from(trainer: T) -> TrainModel<T> {
         let config = *trainer.config();
         let init_bound = 1.0 / config.dims as f32;
+        //let init_bound = 1.0;
         //let distribution = Uniform::new_inclusive(-init_bound, init_bound);
 
         let distribution_mu = Uniform::new_inclusive(-init_bound, init_bound);
-        let distribution_sigma = Uniform::new_inclusive(3.0, 5.0);
+        let distribution_sigma = Uniform::new_inclusive(1.5, 4.0);
 
         let input = stack(Axis(1), &[
             Array2::random(
@@ -143,7 +144,16 @@ impl<T> TrainModel<T> {
     {
         let mut embed = Array1::zeros((embeds.ncols(),));
         let len = indices.len();
+        let l = 16;
+
+        let elu = |val:f32| -> f32 { if val > 0.0 { val } else { val.exp() + 1e-4 }};
+        let elu_inv = |val:f32| -> f32 { if val > 1.0 { val } else { val.ln() }};
+
         for idx in indices {
+            let mut tmp = embeds.index_axis(Axis(0), idx as usize).into_owned();
+
+            tmp.slice_mut(s![l..]).mapv_inplace(|x| { let x = elu(x); x*x });
+
             scaled_add(
                 embed.view_mut(),
                 embeds.index_axis(Axis(0), idx as usize),
@@ -151,10 +161,9 @@ impl<T> TrainModel<T> {
             );
         }
 
-        let l = embed.len();
-
-        scale(embed.slice_mut(s![0..l]), 1.0 / len as f32);
-        scale(embed.slice_mut(s![l..]), 1.0/ len as f32 / len as f32);
+        embed.slice_mut(s![l..]).mapv_inplace(|x| x.sqrt());
+        scale(embed.view_mut(), 1.0 / len as f32);
+        embed.slice_mut(s![l..]).mapv_inplace(|x| elu_inv(x));
 
         embed
     }
