@@ -159,9 +159,11 @@ impl NegativeSamplingSGD {
 
             scaled_add(input_embed, input_delta.view(), 1.0);
 
-            let mut input_embed = model.input_embedding_mut(idx as usize);
-            let l = input_embed.len() / 2;
-            input_embed.slice_mut(s![l..]).mapv_inplace(|x| f32::max(x, 1e-2));
+            for (idx, val) in model.input_embedding_mut(idx as usize).into_iter().enumerate() {
+                if idx % 2 == 1 && *val < 1e-4 {
+                    *val = 1e-4;
+                }
+            }
         }
 
         loss
@@ -219,7 +221,8 @@ impl NegativeSamplingSGD {
             dbg!(&part_gradient_output);
             dbg!(&model.output_embedding(output));
 
-            panic!("Gradient not finite!");
+            return loss;
+            //panic!("Gradient not finite!");
         }
 
         //part_gradient_input.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));
@@ -237,8 +240,11 @@ impl NegativeSamplingSGD {
             lr
         );
 
-        let l = part_gradient_input.len() / 2;
-        model.output_embedding_mut(output).slice_mut(s![l..]).mapv_inplace(|x| f32::max(x, 1e-2));
+        for (idx, val) in model.output_embedding_mut(output).into_iter().enumerate() {
+            if idx % 2 == 1 && *val < 1e-4 {
+                *val = 1e-4;
+            }
+        }
 
         //dbg!("Output {}", model.output_embedding_mut(output));
 

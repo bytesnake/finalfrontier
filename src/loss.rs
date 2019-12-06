@@ -3,7 +3,7 @@ use ndarray::prelude::*;
 use packed_simd::{f32x16, f32x8, f32x4};
 
 use crate::util;
-use crate::vec_simd::dot;
+use crate::vec_simd::{dot, kld};
 
 /// Absolute activations to round in logistic regression.
 ///
@@ -103,94 +103,36 @@ fn logistic_function(a: f32) -> f32 {
 }
 
 pub fn kld_loss(u: ArrayView1<f32>, v: ArrayView1<f32>, label: bool) -> (f32, Array1<f32>, Array1<f32>) {
+    let l = u.len() / 2;
+    //dbg!(kld(u, u));
     let mut kld = kld(u,v);
 
-    let l = u.len() / 2;
+    assert!(!kld.is_nan() && kld.is_finite());
 
-    if kld.is_nan() || !kld.is_finite() {
-        dbg!(&u);
-        dbg!(&v);
-        panic!("Nan");
+    let mut delta1 = Array1::zeros(l*2);
+    let mut delta2 = Array1::zeros(l*2);
+
+    for i in 0..l {
+        delta1[i*2] = (u[i*2] - v[i*2]) / u[i*2+1];
+        delta1[i*2+1] = (1.0 / v[i*2+1] - 1.0 / u[i*2+1] - ((u[i*2]-v[i*2]) / u[i*2+1]).powf(2.0)) / 2.0;
+
+        delta2[i*2] = (v[i*2] - u[i*2]) / u[i*2 + 1];
+        delta2[i*2+1] = (1.0 / v[i*2+1] - 1.0 / u[i*2+1] - ((u[i*2]-v[i*2]) / u[i*2+1]).powf(2.0)) / 2.0;
     }
 
-    let elu = |val:f32| -> f32 { if val > 0.0 { val } else { val.exp() + 1e-4 }};
-    let elud = |val: f32| -> f32 { if val > 0.0 { 1.0 } else { val.exp() }};
+    let loss = if label {
+        delta1.mapv_inplace(|x| 5.0*x*(-kld).exp());
+        delta2.mapv_inplace(|x| 5.0*x*(-kld).exp());
 
-    let delta1_iter = (0..u.len()).map(|i| {
-        if i < l {
-            (u[i] - v[i]) / elu(u[i+l])
-        } else {
-            elud(u[i]) * (elu(v[i]).recip() - 
-                          elu(u[i]).recip() - 
-                          ((u[i-l]-v[i-l]) / elu(u[i])).powf(2.0)) / 2.0
-        }
-    });
-
-    let delta2_iter = (0..u.len()).map(|i| {
-        if i < l {
-            (v[i] - u[i]) / elu(u[i+l])
-        } else {
-            elud(v[i]) * (-elu(u[i])/(elu(v[i]).powf(2.0)) + elu(v[i]).recip())/2.0
-        }
-    });
-
-    dbg!(&kld);
-    if label {
-        (
-            kld.powf(2.0),
-            Array1::from_iter(delta1_iter.map(|x| 2.0*x*kld)),
-            Array1::from_iter(delta2_iter.map(|x| 2.0*x*kld))
-        )
+        5.0*(1.0-(-kld).exp())
     } else {
-        (
-            (-kld).exp(),
-            Array1::from_iter(delta1_iter.map(|x| -(-kld).exp()*x)),
-            Array1::from_iter(delta2_iter.map(|x| -(-kld).exp()*x))
-        )
-    }
-}
+        delta1.mapv_inplace(|x| -(-kld).exp()*x);
+        delta2.mapv_inplace(|x| -(-kld).exp()*x);
 
-/*pub fn kld(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
-    let l = u.len() / 2;
+        (-kld).exp()
+    };
 
-    let mut sigma_ratio = &u.slice(s![l..]) / &v.slice(s![l..]);
-    let trace_fac = sigma_ratio.sum();
-    sigma_ratio.mapv_inplace(|x| util::safe_ln(x));
-
-    let log_det = sigma_ratio.sum();
-    let sq_diff = (&u.slice(s![..l]) - &v.slice(s![..l])).mapv_into(|x| x*x);
-    let mu_diff_sq = (sq_diff / &u.slice(s![l..])).sum();
-         
-    return 0.5 * (trace_fac + mu_diff_sq - l as f32 - log_det);
-}*/
-
-pub fn kld(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
-	let init_vec = move |b: ArrayView1<f32>, off: usize| -> f32x16 {
-            unsafe { f32x16::new(*b.uget(off),*b.uget(off+1),*b.uget(off+2),*b.uget(off+3),*b.uget(off+4),*b.uget(off+5),*b.uget(off+6),*b.uget(off+7),
-                                *b.uget(off+8),*b.uget(off+9),*b.uget(off+10),*b.uget(off+11),*b.uget(off+12),*b.uget(off+13),*b.uget(off+14),*b.uget(off+15)) }
-        };
-
-    if a.len() != 32 || b.len() != 32 {
-        panic!("Only support dimension of 32");
-    }
-
-	let sigma1 = init_vec(a, 16);
-	let mu1 = init_vec(a, 0);
-
-	let sigma2 = init_vec(b, 16);
-	let mu2 = init_vec(b, 0);
-
-	let div = sigma1 / sigma2;
-	let trace_fac = div.sum();
-	let log_det = ((div + 1e-14).ln()).sum();
-
-	let mu_diff_sq = mu1-mu2;
-	let mu_diff_sq = mu_diff_sq*mu_diff_sq;
-	let mu_diff_sq = (mu_diff_sq / sigma1).sum();
-
-	let sum = f32x4::new(trace_fac, mu_diff_sq, -16.0, -log_det);
-
-    0.5 * sum.sum()
+    (loss, delta1, delta2)
 }
 
 #[cfg(test)]

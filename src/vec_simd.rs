@@ -1,5 +1,5 @@
 use cfg_if::cfg_if;
-use ndarray::{ArrayView1, ArrayViewMut1};
+use ndarray::{ArrayView1, ArrayViewMut1, Array1};
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
@@ -78,6 +78,18 @@ cfg_if! {
     }
 }
 
+cfg_if! {
+    if #[cfg(target_feature = "avx")] {
+        pub fn kld(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
+            unsafe { kld_f32x8(u, v) }
+        }
+    } else {
+        pub fn kld(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
+            kld_unvectorized(u.as_slice().unwrap(), v.as_slice().unwrap())
+        }
+    }
+}
+
 #[allow(dead_code)]
 unsafe fn dot_f32x4(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
     assert_eq!(u.len(), v.len());
@@ -142,7 +154,7 @@ unsafe fn dot_f32x8(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
     _mm_cvtss_f32(sums) + dot_unvectorized(u, v)
 }
 
-/*#[cfg(target_feature = "avx")]
+#[cfg(target_feature = "avx")]
 unsafe fn kld_f32x8(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
     assert_eq!(u.len(), v.len());
 
@@ -153,18 +165,100 @@ unsafe fn kld_f32x8(u: ArrayView1<f32>, v: ArrayView1<f32>) -> f32 {
         .as_slice()
         .expect("Cannot apply SIMD instructions on non-contiguous data.")[..u.len()];
 
-    let mut sums1 = _mm256_setzero_ps();
-    let mut sums2 = _mm256_setzero_ps();
-    let mut sums3 = _mm256_setzero_ps();
+    let L = (u.len() - (u.len() % 16)) as f32;
+    let mut sums = _mm256_setzero_ps();
 
-    while u.len() >= 8 {
-        let ux8 = _mm256_loadu_ps(&u[0] as *const f32);
-        let vx8 = _mm256_loadu_ps(&v[0] as *const f32);
-    }*/
+    let mut w = Array1::zeros(u.len());
+    for i in 0..u.len()/2 {
+        w[2*i] = -u[i*2+1].ln();
+        w[2*i+1] = v[i*2+1].ln();
+    }
+
+    let mut w = w.as_slice().unwrap();
+
+    let mask = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
+
+    while u.len() >= 16 {
+        // load 16xf32 from first vector
+        let lo = _mm256_loadu_ps(&u[0] as *const f32);
+        let hi = _mm256_loadu_ps(&u[8] as *const f32);
+
+        // unpack interleaved mu and sigma into two seperate lanes
+        let lo_grouped = _mm256_permutevar8x32_ps(lo, mask);
+        let hi_grouped = _mm256_permutevar8x32_ps(hi, mask);
+
+        let mu1 = _mm256_permute2f128_ps(lo_grouped, hi_grouped, 0 | (2 << 4));
+        let sigma1 = _mm256_permute2f128_ps(lo_grouped, hi_grouped, 1 | (3 << 4));
+
+        // load 16xf32 from second vector
+        let lo = _mm256_loadu_ps(&v[0] as *const f32);
+        let hi = _mm256_loadu_ps(&v[8] as *const f32);
+
+        let lo_grouped = _mm256_permutevar8x32_ps(lo, mask);
+        let hi_grouped = _mm256_permutevar8x32_ps(hi, mask);
+
+        let mu2 = _mm256_permute2f128_ps(lo_grouped, hi_grouped, 0 | (2 << 4));
+        let sigma2 = _mm256_permute2f128_ps(lo_grouped, hi_grouped, 1 | (3 << 4));
+
+        // load 16xf32 from second vector
+        let sigma_log1 = _mm256_loadu_ps(&w[0] as *const f32);
+        let sigma_log2 = _mm256_loadu_ps(&w[8] as *const f32);
+
+        let sigma_div = _mm256_div_ps(sigma1, sigma2);
+
+        //dbg!(&mu1);
+        //dbg!(&mu2);
+        //dbg!(&sigma1);
+        let mu_diff = _mm256_sub_ps(mu1, mu2);
+        let mu_diff_sq = _mm256_mul_ps(mu_diff, mu_diff);
+        let mu_diff_sq_norm = _mm256_div_ps(mu_diff_sq, sigma1);
+
+        //dbg!(&mu_diff_sq_norm);
+
+        sums = _mm256_add_ps(sigma_div, sums);
+        sums = _mm256_add_ps(mu_diff_sq_norm, sums);
+        sums = _mm256_add_ps(sigma_log1, sums);
+        sums = _mm256_add_ps(sigma_log2, sums);
+
+        // Future: support FMA?
+        // sums = _mm256_fmadd_ps(a, b, sums);
+
+        u = &u[16..];
+        v = &v[16..];
+        w = &w[16..];
+    }
+
+
+    sums = _mm256_hadd_ps(sums, sums);
+    sums = _mm256_hadd_ps(sums, sums);
+
+    // Sum sums[0..4] and sums[4..8].
+    let sums = _mm_add_ps(_mm256_castps256_ps128(sums), _mm256_extractf128_ps(sums, 1));
+    let res = (_mm_cvtss_f32(sums) - L/2.0)/2.0 + kld_unvectorized(u, v);
+
+    f32::max(res, 0.0)
+}
 
 pub fn dot_unvectorized(u: &[f32], v: &[f32]) -> f32 {
     assert_eq!(u.len(), v.len());
     u.iter().zip(v).map(|(&a, &b)| a * b).sum()
+}
+
+pub fn kld_unvectorized(mut u: &[f32], mut v: &[f32]) -> f32 {
+    assert!(u.len() % 2 == 0 && v.len() % 2 == 0);
+    assert_eq!(u.len(), v.len());
+
+    let l = u.len() / 2;
+
+    let mut sum = -(l as f32);
+    for _ in 0..l {
+        sum += u[1] / v[1] - (u[1]/v[1]).ln() + (u[0]-v[0]).powf(2.0) / u[1];
+
+        u = &u[2..];
+        v = &v[2..];
+    }
+
+    sum / 2.0
 }
 
 #[allow(dead_code, clippy::float_cmp)]

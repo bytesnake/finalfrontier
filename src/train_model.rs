@@ -10,6 +10,7 @@ use finalfusion::storage::NdArray;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut1, Axis, stack};
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
+use rand::{self, distributions::Distribution};
 
 use serde::Serialize;
 use toml::Value;
@@ -57,38 +58,27 @@ where
     fn from(trainer: T) -> TrainModel<T> {
         let config = *trainer.config();
         let init_bound = 1.0 / config.dims as f32;
-        //let init_bound = 1.0;
-        //let distribution = Uniform::new_inclusive(-init_bound, init_bound);
 
-        let distribution_mu = Uniform::new_inclusive(-init_bound, init_bound);
-        let distribution_sigma = Uniform::new_inclusive(1.5, 4.0);
+        let dist_mu = Uniform::new_inclusive(-init_bound, init_bound);
+        let dist_sigma = Uniform::new_inclusive(1e-4, 1.0);
 
-        let input = stack(Axis(1), &[
-            Array2::random(
-                (trainer.input_vocab().n_input_types(), config.dims as usize / 2),
-                distribution_mu,
-            ).view(),
-            Array2::random(
-                (trainer.input_vocab().n_input_types(), config.dims as usize / 2),
-                distribution_sigma
-            ).view()
-        ]).unwrap().into();
+        let mut rng = rand::thread_rng();
+        let mut generator = |(i,j)| if j%2==0 { dist_mu.sample(&mut rng) } else { dist_sigma.sample(&mut rng) };
 
-        let output = stack(Axis(1), &[
-            Array2::random(
-                (trainer.n_output_types(), config.dims as usize / 2),
-                distribution_mu,
-            ).view(),
-            Array2::random(
-                (trainer.n_output_types(), config.dims as usize / 2),
-                distribution_sigma
-            ).view()
-        ]).unwrap().into();
+        let input = Array2::from_shape_fn(
+            (trainer.input_vocab().n_input_types(), config.dims as usize),
+            &mut generator);
+
+        let output = Array2::from_shape_fn(
+            (trainer.n_output_types(), config.dims as usize),
+            &mut generator);
+
+        println!("{:?}", &input.row(0));
 
         TrainModel {
             trainer,
-            input,
-            output,
+            input: HogwildArray2::from(input),
+            output: HogwildArray2::from(output),
         }
     }
 }
@@ -142,28 +132,24 @@ impl<T> TrainModel<T> {
         I: WordIdx,
         &'a I: IntoIterator<Item = u64>,
     {
-        let mut embed = Array1::zeros((embeds.ncols(),));
+        let mut embed: Array1<f32> = Array1::zeros((embeds.ncols(),));
         let len = indices.len();
-        let l = 16;
 
-        let elu = |val:f32| -> f32 { if val > 0.0 { val } else { val.exp() + 1e-4 }};
-        let elu_inv = |val:f32| -> f32 { if val > 1.0 { val } else { val.ln() }};
+        let l = embeds.ncols() / 2;
 
         for idx in indices {
-            let mut tmp = embeds.index_axis(Axis(0), idx as usize).into_owned();
+            let mut tmp = embeds.index_axis(Axis(0), idx as usize);
 
-            tmp.slice_mut(s![l..]).mapv_inplace(|x| { let x = elu(x); x*x });
-
-            scaled_add(
-                embed.view_mut(),
-                embeds.index_axis(Axis(0), idx as usize),
-                1.0,
-            );
+            for i in 0..l {
+                embed[i*2] += tmp[i*2];
+                embed[i*2+1] += tmp[i*2].powf(2.0);
+            }
         }
 
-        embed.slice_mut(s![l..]).mapv_inplace(|x| x.sqrt());
-        scale(embed.view_mut(), 1.0 / len as f32);
-        embed.slice_mut(s![l..]).mapv_inplace(|x| elu_inv(x));
+        for i in 0..l {
+            embed[i*2] /= len as f32;
+            embed[i*2+1] = embed[i*2+1].sqrt() / len as f32;
+        }
 
         embed
     }
