@@ -57,7 +57,8 @@ where
     /// of the output matrix is the number of possible outputs for the model.
     fn from(trainer: T) -> TrainModel<T> {
         let config = *trainer.config();
-        let init_bound = 1.0 / config.dims as f32;
+        //let init_bound = 1.0 / config.dims as f32;
+        let init_bound = 2.0;
 
         let dist_mu = Uniform::new_inclusive(-init_bound, init_bound);
         let dist_sigma = Uniform::new_inclusive(1e-4, 1.0);
@@ -72,8 +73,6 @@ where
         let output = Array2::from_shape_fn(
             (trainer.n_output_types(), config.dims as usize),
             &mut generator);
-
-        println!("{:?}", &input.row(0));
 
         TrainModel {
             trainer,
@@ -142,7 +141,7 @@ impl<T> TrainModel<T> {
 
             for i in 0..l {
                 embed[i*2] += tmp[i*2];
-                embed[i*2+1] += tmp[i*2].powf(2.0);
+                embed[i*2+1] += tmp[i*2+1].powf(2.0);
             }
         }
 

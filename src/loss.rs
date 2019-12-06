@@ -117,7 +117,7 @@ pub fn kld_loss(u: ArrayView1<f32>, v: ArrayView1<f32>, label: bool) -> (f32, Ar
         delta1[i*2+1] = (1.0 / v[i*2+1] - 1.0 / u[i*2+1] - ((u[i*2]-v[i*2]) / u[i*2+1]).powf(2.0)) / 2.0;
 
         delta2[i*2] = (v[i*2] - u[i*2]) / u[i*2 + 1];
-        delta2[i*2+1] = (1.0 / v[i*2+1] - 1.0 / u[i*2+1] - ((u[i*2]-v[i*2]) / u[i*2+1]).powf(2.0)) / 2.0;
+        delta2[i*2+1] = (u[i*2+1] / v[i*2+1].powf(2.0) - 1.0 / v[i*2+1]) / 2.0;
     }
 
     let loss = if label {
