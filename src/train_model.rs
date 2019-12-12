@@ -57,8 +57,8 @@ where
     /// of the output matrix is the number of possible outputs for the model.
     fn from(trainer: T) -> TrainModel<T> {
         let config = *trainer.config();
-        //let init_bound = 1.0 / config.dims as f32;
-        let init_bound = 2.0;
+        let init_bound = 1.0 / config.dims as f32;
+        //let init_bound = 2.0;
 
         let dist_mu = Uniform::new_inclusive(-init_bound, init_bound);
         let dist_sigma = Uniform::new_inclusive(1e-4, 1.0);

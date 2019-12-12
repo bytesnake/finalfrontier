@@ -121,10 +121,17 @@ pub fn kld_loss(u: ArrayView1<f32>, v: ArrayView1<f32>, label: bool) -> (f32, Ar
     }
 
     let loss = if label {
-        delta1.mapv_inplace(|x| 5.0*x*(-kld).exp());
+        /*delta1.mapv_inplace(|x| 5.0*x*(-kld).exp());
         delta2.mapv_inplace(|x| 5.0*x*(-kld).exp());
 
-        5.0*(1.0-(-kld).exp())
+        5.0*(1.0-(-kld).exp())*/
+        delta1.mapv_inplace(|x| 2.0 * x * kld);
+        delta2.mapv_inplace(|x| 2.0 * x * kld);
+
+        /*delta1.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));
+        delta2.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));*/
+
+        kld * kld
     } else {
         delta1.mapv_inplace(|x| -(-kld).exp()*x);
         delta2.mapv_inplace(|x| -(-kld).exp()*x);

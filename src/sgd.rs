@@ -12,7 +12,7 @@ use crate::vec_simd::scaled_add;
 /// This data type applies stochastic gradient descent on sentences.
 #[derive(Clone)]
 pub struct SGD<T> {
-    loss: Hogwild<f32>,
+    pub loss: Hogwild<f32>,
     model: TrainModel<T>,
     n_examples: Hogwild<usize>,
     n_tokens_processed: Hogwild<usize>,
@@ -160,8 +160,10 @@ impl NegativeSamplingSGD {
             scaled_add(input_embed, input_delta.view(), 1.0);
 
             for (idx, val) in model.input_embedding_mut(idx as usize).into_iter().enumerate() {
-                if idx % 2 == 1 && *val < 1e-4 {
-                    *val = 1e-4;
+                if idx % 2 == 1 && *val < 1e-1 {
+                    *val = 1e-1;
+                } else if (*val).abs() > 5.0 {
+                    *val = 5.0;
                 }
             }
         }
@@ -225,9 +227,6 @@ impl NegativeSamplingSGD {
             //panic!("Gradient not finite!");
         }
 
-        //part_gradient_input.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));
-        //part_gradient_output.mapv_inplace(|x| f32::max(f32::min(x, 10.0), -10.0));
-
         scaled_add(
             input_delta,
             part_gradient_input.view(),
@@ -241,8 +240,10 @@ impl NegativeSamplingSGD {
         );
 
         for (idx, val) in model.output_embedding_mut(output).into_iter().enumerate() {
-            if idx % 2 == 1 && *val < 1e-4 {
-                *val = 1e-4;
+            if idx % 2 == 1 && *val < 1e-1 {
+                *val = 1e-1;
+            } else if (*val).abs() > 5.0 {
+                *val = 5.0;
             }
         }
 

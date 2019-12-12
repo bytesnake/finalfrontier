@@ -216,6 +216,11 @@ fn do_work<P, R, V>(
         thread_data_text(&f, thread, n_threads).or_exit("Could not get thread-specific data", 1);
 
     let mut sentences = SentenceIterator::new(&data[start..]);
+    let mut last_loss = 0.0;
+    let mut lr = start_lr;
+
+    let mut n = 0;
+
     while sgd.n_tokens_processed() < epochs as usize * n_tokens {
         let sentence = if let Some(sentence) = sentences.next() {
             sentence
@@ -227,10 +232,21 @@ fn do_work<P, R, V>(
         }
         .or_exit("Cannot read sentence", 1);
 
-        let lr = (1.0 - (sgd.n_tokens_processed() as f32 / (epochs as usize * n_tokens) as f32))
-            * start_lr;
+        //let lr = (1.0 - (sgd.n_tokens_processed() as f32 / (epochs as usize * n_tokens) as f32))
+        //    * start_lr;
 
         sgd.update_sentence(&sentence, lr);
+
+        if sgd.train_loss() > last_loss + 0.05 {
+            lr /= 2.0;
+            n = 0;
+        } else if n > 1000 && sgd.train_loss() < last_loss - 0.05 {
+            lr *= 1.01;
+            n = 0;
+            println!("increase");
+        }
+        last_loss = sgd.train_loss();
+        n += 1;
     }
 }
 
